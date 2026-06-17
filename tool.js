@@ -1102,16 +1102,17 @@ function generatePDF() {
   const descColLabelW = 130;
   const descColValueW = 220;
   const descColPhotoW = contentWidth - descColLabelW - descColValueW;
-  const descRowHeight = 30;
 
+  // Per-row heights: Surface Description gets more room (often wraps to 2-3 lines);
+  // Length/Size is usually short and doesn't need much.
   const descRows = [
-    ['Surface Description:', state.surface],
-    ['Length / Size:', state.size],
-    ['Ingredients:', state.ingredients],
-    ['Acceptable Level of Contamination:', state.contamination],
+    ['Surface Description:', state.surface, 42],
+    ['Length / Size:', state.size, 18],
+    ['Ingredients:', state.ingredients, 30],
+    ['Acceptable Level of Contamination:', state.contamination, 30],
   ];
 
-  const descBlockHeight = descRows.length * descRowHeight;
+  const descBlockHeight = descRows.reduce((sum, r) => sum + r[2], 0);
 
   // Photo cell — spans all 4 rows
   doc.rect(margin + descColLabelW + descColValueW, cursorY, descColPhotoW, descBlockHeight);
@@ -1145,17 +1146,19 @@ function generatePDF() {
 
   // Description rows
   let descY = cursorY;
-  for (const [label, value] of descRows) {
-    doc.rect(margin, descY, descColLabelW, descRowHeight);
-    doc.rect(margin + descColLabelW, descY, descColValueW, descRowHeight);
+  for (const [label, value, rowH] of descRows) {
+    doc.rect(margin, descY, descColLabelW, rowH);
+    doc.rect(margin + descColLabelW, descY, descColValueW, rowH);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(20, 20, 20);
-    doc.text(label, margin + 6, descY + 14, { maxWidth: descColLabelW - 12 });
+    doc.text(label, margin + 6, descY + 12, { maxWidth: descColLabelW - 12 });
     doc.setFont('helvetica', 'normal');
+    // Allow up to 4 wrapped lines so the Surface row fully renders
     const wrapped = doc.splitTextToSize(value || '—', descColValueW - 12);
-    doc.text(wrapped.slice(0, 3), margin + descColLabelW + 6, descY + 12);
-    descY += descRowHeight;
+    const maxLines = Math.max(1, Math.floor((rowH - 4) / 11));
+    doc.text(wrapped.slice(0, maxLines), margin + descColLabelW + 6, descY + 12);
+    descY += rowH;
   }
   cursorY = descY;
 
@@ -1315,7 +1318,7 @@ function generatePDF() {
   // Footer — approval chain (ISO 7.5.2 b/d)
   // ============================================================
   // Anchored at bottom — leaving a fixed amount of space
-  const footerY = pageHeight - margin - 80;
+  const footerY = pageHeight - margin - 90;
   const footerStartY = Math.max(cursorY + 20, footerY);
 
   doc.setFillColor(239, 238, 232);
@@ -1326,38 +1329,56 @@ function generatePDF() {
   doc.text('Document Control', margin + 8, footerStartY + 13);
 
   const ctrlY = footerStartY + 18;
-  const ctrlColW = contentWidth / 3;
-  doc.rect(margin, ctrlY, ctrlColW, 36);
-  doc.rect(margin + ctrlColW, ctrlY, ctrlColW, 36);
-  doc.rect(margin + ctrlColW * 2, ctrlY, ctrlColW, 36);
+  const ctrlColW = contentWidth / 2;
+  doc.rect(margin, ctrlY, ctrlColW, 44);
+  doc.rect(margin + ctrlColW, ctrlY, ctrlColW, 44);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(60, 60, 60);
-  doc.text('Created By:', margin + 6, ctrlY + 12);
-  doc.text('Approved By:', margin + ctrlColW + 6, ctrlY + 12);
-  doc.text('Revised By:', margin + ctrlColW * 2 + 6, ctrlY + 12);
+  doc.text('Created / Approved By:', margin + 6, ctrlY + 12);
+  doc.text('Revised By:', margin + ctrlColW + 6, ctrlY + 12);
 
+  // Created / Approved column — combines both names and dates
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(20, 20, 20);
-  doc.text(state.createdBy || '—', margin + 6, ctrlY + 24);
-  doc.text(state.approvedBy || '—', margin + ctrlColW + 6, ctrlY + 24);
-  doc.text(state.revisedBy || '—', margin + ctrlColW * 2 + 6, ctrlY + 24);
+  const createdLine = state.createdBy || '—';
+  const approvedLine = state.approvedBy && state.approvedBy !== state.createdBy
+    ? `Approved: ${state.approvedBy}`
+    : '';
+  doc.text(createdLine, margin + 6, ctrlY + 24);
+  if (approvedLine) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(60, 60, 60);
+    doc.text(approvedLine, margin + 6, ctrlY + 34);
+  }
 
+  // Revised By column
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(20, 20, 20);
+  doc.text(state.revisedBy || '—', margin + ctrlColW + 6, ctrlY + 24);
+
+  // Dates row
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(80, 80, 80);
-  doc.text(`Date: ${formatDateDisplay(state.createdDate) || '—'}`, margin + 6, ctrlY + 33);
-  doc.text(`Date: ${formatDateDisplay(state.approvedDate) || '—'}`, margin + ctrlColW + 6, ctrlY + 33);
-  doc.text(`Date: ${formatDateDisplay(state.revisedDate) || '—'}`, margin + ctrlColW * 2 + 6, ctrlY + 33);
+  const createdDate = formatDateDisplay(state.createdDate) || '—';
+  const approvedDate = formatDateDisplay(state.approvedDate);
+  const datesLeft = approvedDate && approvedDate !== createdDate
+    ? `Created: ${createdDate}  ·  Approved: ${approvedDate}`
+    : `Date: ${createdDate}`;
+  doc.text(datesLeft, margin + 6, ctrlY + 41);
+  doc.text(`Date: ${formatDateDisplay(state.revisedDate) || '—'}`, margin + ctrlColW + 6, ctrlY + 41);
 
   // "Uncontrolled when printed" + generator stamp
   doc.setFont('helvetica', 'italic');
   doc.setFontSize(7);
   doc.setTextColor(140, 140, 140);
-  doc.text('Uncontrolled when printed · Master copy resides in CtL DMS', margin, ctrlY + 50);
-  doc.text(`Generated ${formatDateDisplay(todayISO())} by ${state.generator} v${state.generatorVersion}`, pageWidth - margin, ctrlY + 50, { align: 'right' });
+  doc.text('Uncontrolled when printed · Master copy resides in CtL DMS', margin, ctrlY + 58);
+  doc.text(`Generated ${formatDateDisplay(todayISO())} by ${state.generator} v${state.generatorVersion}`, pageWidth - margin, ctrlY + 58, { align: 'right' });
 
   // ============================================================
   // Save
